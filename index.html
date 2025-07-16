@@ -13,8 +13,8 @@
 
     <div class="form-grid">
       <div class="control-group">
-        <label for="fpsSlider">Target FPS: <span id="fpsLabel">15</span></label>
-        <input type="range" id="fpsSlider" min="1" max="60" value="15" />
+        <label for="fpsSlider">Target FPS: <span id="fpsLabel">50</span></label>
+        <input type="range" id="fpsSlider" min="1" max="75" value="50" />
       </div>
 
       <div class="control-group">
@@ -38,6 +38,10 @@
       <label class="checkbox-group" for="enforceSize">
         <input type="checkbox" id="enforceSize" checked />
         Keep output under 5MB
+      </label>
+        <label class="checkbox-group" for="enableDithering"> 
+      <input type="checkbox" id="ditheringEnabled" checked />
+      Enable Dithering
       </label>
     </div>
 
@@ -71,6 +75,8 @@
     const originalPreview = document.getElementById('originalPreview');
     const resultDiv = document.getElementById('result');
     const progress = document.getElementById('progress');
+    const enableDitheringCheckbox = document.getElementById('enableDithering');
+    const ditheringEnabled = enableDitheringCheckbox.checked;
     
 
     // Custom dropdown logic
@@ -184,6 +190,14 @@ document.addEventListener('click', (e) => {
           const scaledCtx = scaledCanvas.getContext('2d');
           scaledCtx.imageSmoothingEnabled = true;
           scaledCtx.imageSmoothingQuality = 'high';
+
+          //dither
+          gif.addFrame(scaledCtx,
+            { copy: true, 
+              delay: frameInfo.delay * 10,
+              dither: ditheringEnabled ? 'floyd-steinberg' : 'false'
+            }
+          )
 
           const imageData = sourceCtx.createImageData(originalWidth, originalHeight);
 
