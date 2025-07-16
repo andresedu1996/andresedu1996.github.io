@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Client-side GIF Frame Rate Optimizer</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="glass">
+    <h1>GIF Frame Rate Optimizer</h1>
+
+    <input type="file" id="gifInput" accept="image/gif" />
+
+    <div class="form-grid">
+      <div class="control-group">
+        <label for="fpsSlider">Target FPS: <span id="fpsLabel">15</span></label>
+        <input type="range" id="fpsSlider" min="1" max="60" value="15" />
+      </div>
+
+      <div class="control-group">
+        <label for="qualitySlider">GIF Quality: <span id="qualityLabel">10</span></label>
+        <input type="range" id="qualitySlider" min="1" max="30" value="10" />
+      </div>
+
+ <div class="control-group">
+  <label>Resize Image:</label>
+  <div class="custom-dropdown" id="scaleDropdown">
+    <div class="custom-dropdown-toggle" id="dropdownToggle">50%</div>
+    <ul class="custom-dropdown-options" id="dropdownOptions">
+      <li data-value="1">100%</li>
+      <li data-value="0.75">75%</li>
+      <li data-value="0.5" class="selected">50%</li>
+      <li data-value="0.25">25%</li>
+    </ul>
+  </div>
+</div>
+
+      <label class="checkbox-group" for="enforceSize">
+        <input type="checkbox" id="enforceSize" checked />
+        Keep output under 5MB
+      </label>
+    </div>
+
+    <div id="progressBar"><div id="progress"></div></div>
+    <button id="optimizeBtn">Optimize GIF</button>
+
+    <div class="container">
+      <div class="preview">
+        <h3>Original GIF</h3>
+        <img id="originalPreview" alt="Original GIF preview" />
+      </div>
+      <div class="preview">
+        <h3>Optimized GIF</h3>
+        <div id="result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.js"></script>
+
+  <script>
+    const gifInput = document.getElementById('gifInput');
+    const fpsSlider = document.getElementById('fpsSlider');
+    const fpsLabel = document.getElementById('fpsLabel');
+    const qualitySlider = document.getElementById('qualitySlider');
+    const qualityLabel = document.getElementById('qualityLabel');
+    const enforceSizeCheckbox = document.getElementById('enforceSize');
+    const optimizeBtn = document.getElementById('optimizeBtn');
+    const originalPreview = document.getElementById('originalPreview');
+    const resultDiv = document.getElementById('result');
+    const progress = document.getElementById('progress');
+    
+
+    // Custom dropdown logic
+const dropdownToggle = document.getElementById('dropdownToggle');
+const dropdownOptions = document.getElementById('dropdownOptions');
+const scaleDropdown = document.getElementById('scaleDropdown');
+let scaleFactor = 0.5; // default value
+
+dropdownToggle.addEventListener('click', () => {
+  dropdownOptions.style.display = dropdownOptions.style.display === 'block' ? 'none' : 'block';
+});
+
+dropdownOptions.querySelectorAll('li').forEach((item) => {
+  item.addEventListener('click', () => {
+    // update selected visually
+    dropdownOptions.querySelectorAll('li').forEach(li => li.classList.remove('selected'));
+    item.classList.add('selected');
+
+    // set scale factor and update UI
+    scaleFactor = parseFloat(item.dataset.value);
+    dropdownToggle.textContent = item.textContent;
+
+    // close dropdown
+    dropdownOptions.style.display = 'none';
+  });
+});
+
+// Optional: Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  if (!scaleDropdown.contains(e.target)) {
+    dropdownOptions.style.display = 'none';
+  }
+});
+
+    // Label update
+    fpsSlider.addEventListener('input', () => {
+      fpsLabel.textContent = fpsSlider.value;
+    });
+
+    qualitySlider.addEventListener('input', () => {
+      qualityLabel.textContent = qualitySlider.value;
+    });
+
+    gifInput.addEventListener('change', async () => {
+      const file = gifInput.files[0];
+      if (file && file.type === 'image/gif') {
+        gifArrayBuffer = await file.arrayBuffer();
+        originalPreview.src = URL.createObjectURL(file);
+        resultDiv.innerHTML = '';
+        progress.style.width = '0%';
+      } else {
+        alert('Please upload a valid GIF file.');
+        gifArrayBuffer = null;
+        originalPreview.src = '';
+        resultDiv.innerHTML = '';
+        progress.style.width = '0%';
+      }
+    });
+
+    let gifArrayBuffer = null;
+
+    optimizeBtn.addEventListener('click', async () => {
+      if (!gifArrayBuffer) {
+        alert('Please upload a GIF first.');
+        return;
+      }
+
+      optimizeBtn.disabled = true;
+      progress.style.width = '10%';
+
+      try {
+        const reader = new GifReader(new Uint8Array(gifArrayBuffer));
+        const frameCount = reader.numFrames();
+        const originalDelay = reader.frameInfo(0).delay || 10;
+        const originalFps = 100 / originalDelay;
+
+        const originalWidth = reader.width;
+        const originalHeight = reader.height;
+        const scaledWidth = Math.round(originalWidth * scaleFactor);
+        const scaledHeight = Math.round(originalHeight * scaleFactor);
+
+        const targetFps = parseInt(fpsSlider.value);
+        const baseQuality = parseInt(qualitySlider.value);
+        const enforceSize = enforceSizeCheckbox.checked;
+        const MAX_SIZE = 5 * 1024 * 1024;
+
+        let frameSkip = Math.max(1, Math.round(originalFps / targetFps));
+        let quality = baseQuality;
+        let retryCount = 0;
+        let success = false;
+        let finalBlob = null;
+
+        while (retryCount < 5) {
+          const gif = new GIF({
+            workers: 2,
+            quality,
+            width: scaledWidth,
+            height: scaledHeight,
+            workerScript: './gif.worker.js'
+          });
+
+          const sourceCanvas = document.createElement('canvas');
+          sourceCanvas.width = originalWidth;
+          sourceCanvas.height = originalHeight;
+          const sourceCtx = sourceCanvas.getContext('2d');
+
+          const scaledCanvas = document.createElement('canvas');
+          scaledCanvas.width = scaledWidth;
+          scaledCanvas.height = scaledHeight;
+          const scaledCtx = scaledCanvas.getContext('2d');
+
+          const imageData = sourceCtx.createImageData(originalWidth, originalHeight);
+
+          for (let i = 0; i < frameCount; i += frameSkip) {
+            const frameInfo = reader.frameInfo(i);
+            reader.decodeAndBlitFrameRGBA(i, imageData.data);
+            sourceCtx.putImageData(imageData, 0, 0);
+            scaledCtx.clearRect(0, 0, scaledWidth, scaledHeight);
+            scaledCtx.drawImage(sourceCanvas, 0, 0, scaledWidth, scaledHeight);
+            gif.addFrame(scaledCtx, { copy: true, delay: frameInfo.delay * 10 });
+          }
+
+          const blob = await new Promise(resolve => {
+            gif.on('finished', resolve);
+            gif.render();
+          });
+
+          if (!enforceSize || blob.size <= MAX_SIZE) {
+            finalBlob = blob;
+            success = true;
+            break;
+          }
+
+          retryCount++;
+          frameSkip += 1;
+          quality += 5;
+        }
+
+        if (!success) {
+          alert("❌ Could not reduce GIF under 5MB after scaling & retries.\nTry choosing a lower resolution or FPS.");
+          optimizeBtn.disabled = false;
+          progress.style.width = '0%';
+          return;
+        }
+
+        const url = URL.createObjectURL(finalBlob);
+        const img = document.createElement('img');
+        img.src = url;
+
+        const downloadLink = document.createElement('a');
+        downloadLink.href = url;
+        downloadLink.download = 'optimized.gif';
+        downloadLink.textContent = `Download Optimized GIF (${(finalBlob.size / 1024 / 1024).toFixed(2)} MB)`;
+
+        resultDiv.innerHTML = '';
+        resultDiv.appendChild(img);
+        resultDiv.appendChild(document.createElement('br'));
+        resultDiv.appendChild(downloadLink);
+
+        progress.style.width = '100%';
+        optimizeBtn.disabled = false;
+
+      } catch (error) {
+        console.error(error);
+        alert('Failed to optimize GIF.');
+        optimizeBtn.disabled = false;
+        progress.style.width = '0%';
+      }
+    });
+  </script>
+</body>
+</html>
